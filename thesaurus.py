@@ -5,149 +5,149 @@ import sys
 import os
 
 try:
-		from urllib.request import urlopen
-		from urllib.parse import urlparse
-		from urllib.parse import quote
-		from urllib.error import HTTPError
+    from urllib.request import urlopen
+    from urllib.parse import urlparse
+    from urllib.parse import quote
+    from urllib.error import HTTPError
 except ImportError:
-		from urlparse import urlparse
-		from urllib import quote
-		from urllib2 import urlopen
-		from urllib2 import HTTPError
+    from urlparse import urlparse
+    from urllib import quote
+    from urllib2 import urlopen
+    from urllib2 import HTTPError
 
 alternativesLocation = os.path.join(os.path.abspath(os.path.dirname(__file__)), "alternatives.py")
 
 class NoResultError(Exception):
-	def __init__(self, message):
-		self.message = message;
+  def __init__(self, message):
+    self.message = message;
 
-	def __str__(self):
-		return repr(self.message)
+  def __str__(self):
+    return repr(self.message)
 
 class ThesaurusCommand(sublime_plugin.TextCommand):
-	def run(self, edit):
-		self.result = []
-		self.region = False
-		self.value = ""
-		self.edit = edit
+  def run(self, edit):
+    self.result = []
+    self.region = False
+    self.value = ""
+    self.edit = edit
 
-		if all(map(lambda x : len(x) == 0, self.view.sel())):
-			self.view.run_command("expand_selection", {"to": "word"})
-		# process our selected word
-		self.processWord(self.selected_word())
+    if all(map(lambda x : len(x) == 0, self.view.sel())):
+      self.view.run_command("expand_selection", {"to": "word"})
+    # process our selected word
+    self.processWord(self.selected_word())
 
-	def noAction(self, value):
-		self.view.erase_status("Thesaurus")
-		pass
+  def noAction(self, value):
+    self.view.erase_status("Thesaurus")
+    pass
 
-	def processWord(self, word):
-		self.word = word
-		if self.word is None or len(self.word) == 0:
-			self.view.set_status("Thesaurus", "Please select a word first!")
-			sublime.active_window().show_quick_panel(["Please select a word first!"], self.noAction)
-			return
+  def processWord(self, word):
+    self.word = word
+    if self.word is None or len(self.word) == 0:
+      self.view.set_status("Thesaurus", "Please select a word first!")
+      sublime.active_window().show_quick_panel(["Please select a word first!"], self.noAction)
+      return
 
-		try:
-			self.results = self.synonyms()
-			sublime.active_window().show_quick_panel(self.results, self.valueIsSelected)
-		except NoResultError:
-			# nothing was found, look for alternatives
-			self.view.set_status("Thesaurus", "No results were found for '%s'!" % self.word)
-			self.alternatives = ["No results were found for '%s'!, try one of the following:" % self.word]
-			self.alternatives.extend(self.get_alternative_words())
-			sublime.active_window().show_quick_panel(self.alternatives, self.alternativeIsSelected)
+    try:
+      self.results = self.synonyms()
+      sublime.active_window().show_quick_panel(self.results, self.valueIsSelected)
+    except NoResultError:
+      # nothing was found, look for alternatives
+      self.view.set_status("Thesaurus", "No results were found for '%s'!" % self.word)
+      self.alternatives = ["No results were found for '%s'!, try one of the following:" % self.word]
+      self.alternatives.extend(self.get_alternative_words())
+      sublime.active_window().show_quick_panel(self.alternatives, self.alternativeIsSelected)
 
-	def alternativeIsSelected(self, value):
-		if value >= 1:
-			self.processWord(self.alternatives[value])
-		else:
-			self.view.erase_status("Thesaurus")
+  def alternativeIsSelected(self, value):
+    if value >= 1:
+      self.processWord(self.alternatives[value])
+    else:
+      self.view.erase_status("Thesaurus")
 
-	def valueIsSelected(self, value):
-		if value != -1:
-			self.replace(self.results[value])
-			self.view.erase_status("Thesaurus")
+  def valueIsSelected(self, value):
+    if value != -1:
+      self.replace(self.results[value])
+      self.view.erase_status("Thesaurus")
 
-	def selected_word(self):
-		for region in self.view.sel():
-			if not region.empty():
-				self.region = region
-				return self.view.substr(region)
+  def selected_word(self):
+    for region in self.view.sel():
+      if not region.empty():
+        self.region = region
+        return self.view.substr(region)
 
-	def replace(self, value):
-		if not self.region or value is None or len(value) == 1:
-			return
+  def replace(self, value):
+    if not self.region or value is None or len(value) == 1:
+      return
 
-		value = re.subn(r'\(.*?\)$', "", value)[0]
-		if value is not None:
-			self.view.run_command("insert", {"characters": value.strip().lower()})
+    value = re.subn(r'\(.*?\)$', "", value)[0]
+    if value is not None:
+      self.view.run_command("insert", {"characters": value.strip().lower()})
 
-	def synonyms(self):
-		result = []
-		try:
-				data = self.get_json_from_api()
-				for entry in data["response"]:
-						result.append(entry["list"]["synonyms"].split("|"))
-		except (KeyError, HTTPError):
-				if 'data' in locals():
-						raise NoResultError(data["error"])
-				else:
-						raise NoResultError("Word not found.")
+  def synonyms(self):
+    result = []
+    try:
+        data = self.get_json_from_api()
+        for entry in data["response"]:
+            result.append(entry["list"]["synonyms"].split("|"))
+    except (KeyError, HTTPError):
+        if 'data' in locals():
+            raise NoResultError(data["error"])
+        else:
+            raise NoResultError("Word not found.")
 
-		r = list(set([item for sublist in result for item in sublist]))
-		r.sort()
-		return r
+    r = list(set([item for sublist in result for item in sublist]))
+    r.sort()
+    return r
 
-	def get_json_from_api(self):
-		word = quote(self.word)
-		url = "http://thesaurus.altervista.org/thesaurus/v1?key=%s&word=%s&language=%s&output=json" % (self.api_key(), word, self.language())
-		# print(url)
-		response = urlopen(url)
-		content = response.read().decode('utf-8')
-		response.close()
-		return json.loads(content)
+  def get_json_from_api(self):
+    word = quote(self.word)
+    url = "http://thesaurus.altervista.org/thesaurus/v1?key=%s&word=%s&language=%s&output=json" % (self.api_key(), word, self.language())
+    # print(url)
+    response = urlopen(url)
+    content = response.read().decode('utf-8')
+    response.close()
+    return json.loads(content)
 
-	def api_key(self):
-		settings = sublime.load_settings('Thesaurus.sublime-settings')
-		if settings.get("api_key"):
-			return settings.get("api_key")
-		else:
-			settings = sublime.load_settings('Preferences.sublime-settings')
-			return settings.get("thesaurus_api_key")
+  def api_key(self):
+    settings = sublime.load_settings('Thesaurus.sublime-settings')
+    if settings.get("api_key"):
+      return settings.get("api_key")
+    else:
+      settings = sublime.load_settings('Preferences.sublime-settings')
+      return settings.get("thesaurus_api_key")
 
-	def language(self):
-		settings = sublime.load_settings('Thesaurus.sublime-settings')
-		if settings.get("language"):
-			return settings.get("language")
-		else:
-			settings = sublime.load_settings('Preferences.sublime-settings')
-			return settings.get("thesaurus_language")
+  def language(self):
+    settings = sublime.load_settings('Thesaurus.sublime-settings')
+    if settings.get("language"):
+      return settings.get("language")
+    else:
+      settings = sublime.load_settings('Preferences.sublime-settings')
+      return settings.get("thesaurus_language")
 
-	def get_alternative_words(self):
-		# dirty hack around not being able to use enchant in sublime
-		import subprocess
-		try:
-			p = subprocess.Popen(["python", alternativesLocation, self.word], stdout=subprocess.PIPE)
-			alternativesString = p.communicate()[0]
-			p.stdout.close()
-			ldict = {}
-			exec(alternativesString, globals(), ldict)
-			# print(str(ldict['alternatives']))
-			alternatives = ldict['alternatives']
-		except Exception as err:
-			alternatives = ['ERROR', str(err)]
-		
-		if alternatives[0] == 'ERROR':
-			# nope, an error occurred, do it the dummy way
-			print("Enchant error: %s, defaulting to dummy method..." % str(alternatives[1]))
-			suffixes = ["es", "s", "ed", "er", "ly", "ing"]
-			alternatives = []
-			for suffix in suffixes:
-				if self.word.lower().endswith(suffix):
-					alternatives.append(self.word[:(-1*len(suffix))]);
-		elif str(self.word).isupper():
-			alternatives = list(map(lambda x : x.upper(), alternatives))
-		elif str(self.word).istitle():
-			alternatives = list(map(lambda x : x.title(), alternatives))
-		
-		return alternatives
+  def get_alternative_words(self):
+    # dirty hack around not being able to use enchant in sublime
+    import subprocess
+    try:
+      p = subprocess.Popen(["python", alternativesLocation, self.word], stdout=subprocess.PIPE)
+      alternativesString = p.communicate()[0]
+      p.stdout.close()
+      ldict = {}
+      exec(alternativesString, globals(), ldict)
+      # print(str(ldict['alternatives']))
+      alternatives = ldict['alternatives']
+    except Exception as err:
+      alternatives = ['ERROR', str(err)]
+    
+    if alternatives[0] == 'ERROR':
+      # nope, an error occurred, do it the dummy way
+      print("Enchant error: %s, defaulting to dummy method..." % str(alternatives[1]))
+      suffixes = ["es", "s", "ed", "er", "ly", "ing"]
+      alternatives = []
+      for suffix in suffixes:
+        if self.word.lower().endswith(suffix):
+          alternatives.append(self.word[:(-1*len(suffix))]);
+    elif str(self.word).isupper():
+      alternatives = list(map(lambda x : x.upper(), alternatives))
+    elif str(self.word).istitle():
+      alternatives = list(map(lambda x : x.title(), alternatives))
+    
+    return alternatives
